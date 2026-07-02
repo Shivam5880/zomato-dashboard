@@ -1,65 +1,94 @@
+"""
+migrate_to_supabase.py
+======================
+Pushes your two processed CSVs into Supabase Postgres.
+Run this ONCE. Re-run whenever you have fresh data (it clears and reloads).
+
+Usage:
+    pip install pandas psycopg2-binary sqlalchemy
+    python migrate_to_supabase.py
+
+Fill in your Supabase credentials below (from Supabase → Settings → Database → URI).
+"""
+
 import pandas as pd
-import numpy as np
-import math
-from supabase import create_client
+from sqlalchemy import create_engine, text
 
-SUPABASE_URL = "https://rzqjpwfajoxjnersjhwt.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6cWpwd2Zham94am5lcnNqaHd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxODYxNDEsImV4cCI6MjA5Nzc2MjE0MX0.KTluz80HVcJNtqQcg7umcZ2gnK1Nw7JKfMII3hUVe4w"
+# ─────────────────────────────────────────
+# YOUR SUPABASE CONNECTION — fill these in
+# ─────────────────────────────────────────
+SUPABASE_HOST     = "db.xxxxxxxxxxxx.supabase.co"   # from Supabase → Settings → Database
+SUPABASE_PORT     = "5432"
+SUPABASE_DB       = "postgres"
+SUPABASE_USER     = "postgres"
+SUPABASE_PASSWORD = "your_password_here"             # your Supabase DB password
 
-METRICS_CSV = "C:/Users/Admin/Desktop/Extrawork/Command_Code_Zomato_detailed_report/unpivoted_output.csv"
-ORDERS_CSV  = "C:/Users/Admin/Desktop/Extrawork/Command_Code_Zomato_Order_Data/orders_exploded.csv"
+# ─────────────────────────────────────────
+# CSV PATHS — adjust if files are elsewhere
+# ─────────────────────────────────────────
+METRICS_CSV = "unpivoted_output.csv"
+ORDERS_CSV  = "orders_exploded.csv"
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+# ─────────────────────────────────────────────────────────
+# DO NOT EDIT BELOW THIS LINE
+# ─────────────────────────────────────────────────────────
 
-def clean_records(df):
-    """Remove all NaN, inf, -inf values from dataframe"""
-    df = df.replace([np.inf, -np.inf], None)
-    df = df.where(pd.notnull(df), None)
-    records = df.to_dict(orient="records")
-    for i, rec in enumerate(records):
-        for k, v in rec.items():
-            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-                records[i][k] = None
-    return records
+conn_str = (
+    f"postgresql://{SUPABASE_USER}:{SUPABASE_PASSWORD}"
+    f"@{SUPABASE_HOST}:{SUPABASE_PORT}/{SUPABASE_DB}"
+)
 
 print("=" * 55)
 print("  Zomato Dashboard — Supabase Migration")
 print("=" * 55)
 
-# ── 1. Metrics ──────────────────────────────────────────
+engine = create_engine(conn_str)
+
+# ── 1. Metrics table ──────────────────────────────────────
 print("\n[1/2] Loading metrics CSV...")
-df = pd.read_csv(METRICS_CSV)
-df["Date"] = pd.to_datetime(df["Date"]).dt.strftime("%Y-%m-%d")
-df.columns = [c.lower().replace(" ", "_").replace("(", "").replace(")", "") for c in df.columns]
-print("  Columns:", list(df.columns))
-records = clean_records(df)
-print(f"  ✓ {len(records):,} rows cleaned")
+df_metrics = pd.read_csv(METRICS_CSV)
+df_metrics["Date"] = pd.to_datetime(df_metrics["Date"])
+df_metrics.columns = [c.lower().replace(" ", "_").replace("(", "").replace(")", "") for c in df_metrics.columns]
+print(f"  ✓ {len(df_metrics):,} rows loaded")
 
-print("  Pushing to Supabase...")
-batch = 500
-for i in range(0, len(records), batch):
-    supabase.table("zomato_metrics").upsert(records[i:i+batch]).execute()
-    print(f"    Uploaded {min(i+batch, len(records)):,} / {len(records):,} rows")
-print("  ✓ zomato_metrics done!")
+print("  Pushing to Supabase table: zomato_metrics ...")
+with engine.begin() as conn:
+    conn.execute(text("DROP TABLE IF EXISTS zomato_metrics CASCADE"))
+df_metrics.to_sql("zomato_metrics", engine, if_exists="replace", index=False)
+print(f"  ✓ zomato_metrics created ({len(df_metrics):,} rows)")
 
-# ── 2. Orders ───────────────────────────────────────────
+# ── 2. Orders table ───────────────────────────────────────
 print("\n[2/2] Loading orders CSV...")
-df2 = pd.read_csv(ORDERS_CSV)
-df2["Order Placed At"] = pd.to_datetime(df2["Order Placed At"]).dt.strftime("%Y-%m-%d %H:%M:%S")
-df2.columns = [
-    c.lower().replace(" ", "_").replace("(", "").replace(")", "")
-     .replace("/", "_").replace("-", "_").replace("+", "plus")
-     .replace("%", "pct").replace(",", "").replace("&", "and")
-    for c in df2.columns
+df_orders = pd.read_csv(ORDERS_CSV)
+df_orders["Order Placed At"] = pd.to_datetime(df_orders["Order Placed At"])
+df_orders.columns = [
+    c.lower()
+     .replace(" ", "_")
+     .replace("(", "")
+     .replace(")", "")
+     .replace("/", "_")
+     .replace("-", "_")
+     .replace("+", "plus")
+     .replace("%", "pct")
+     .replace(",", "")
+    for c in df_orders.columns
 ]
-print("  Columns:", list(df2.columns))
-records2 = clean_records(df2)
-print(f"  ✓ {len(records2):,} rows cleaned")
+print(f"  ✓ {len(df_orders):,} rows loaded")
 
-print("  Pushing to Supabase...")
-for i in range(0, len(records2), batch):
-    supabase.table("zomato_orders").upsert(records2[i:i+batch]).execute()
-    print(f"    Uploaded {min(i+batch, len(records2)):,} / {len(records2):,} rows")
-print("  ✓ zomato_orders done!")
+print("  Pushing to Supabase table: zomato_orders ...")
+with engine.begin() as conn:
+    conn.execute(text("DROP TABLE IF EXISTS zomato_orders CASCADE"))
+df_orders.to_sql("zomato_orders", engine, if_exists="replace", index=False)
+print(f"  ✓ zomato_orders created ({len(df_orders):,} rows)")
 
-print("\n✅ Migration complete!")
+# ── 3. Verify ─────────────────────────────────────────────
+print("\n[Verify] Row counts in Supabase:")
+with engine.connect() as conn:
+    r1 = conn.execute(text("SELECT COUNT(*) FROM zomato_metrics")).scalar()
+    r2 = conn.execute(text("SELECT COUNT(*) FROM zomato_orders")).scalar()
+    brands = conn.execute(text("SELECT DISTINCT restaurant_name FROM zomato_metrics ORDER BY 1")).fetchall()
+
+print(f"  zomato_metrics : {r1:,} rows")
+print(f"  zomato_orders  : {r2:,} rows")
+print(f"  Brands found   : {[b[0] for b in brands]}")
+print("\n✅ Migration complete! You can now start the dashboard.")
