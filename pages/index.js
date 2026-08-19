@@ -136,7 +136,7 @@ function addDays(d, n)   { const x = new Date(d+'T00:00:00'); x.setDate(x.getDat
 function addWeeks(d, n)  { return addDays(d, n*7) }
 function addMonths(d, n) { const x = new Date(d+'T00:00:00'); x.setMonth(x.getMonth()+n); return x.toISOString().split('T')[0] }
 function today()         { return new Date().toISOString().split('T')[0] }
-function getMaxTo(f, g)  { if (!f) return ''; return g==='daily'?addDays(f,14):g==='weekly'?addWeeks(f,14):addMonths(f,14) }
+function getMaxTo(f, g)  { if (!f) return ''; if(g==='daywise') return addMonths(f,12); return g==='daily'?addDays(f,14):g==='weekly'?addWeeks(f,14):addMonths(f,14) }
 
 const TABS = [
   { id: 'brand_details', label: 'Brand details' },
@@ -189,7 +189,7 @@ export default function Home() {
     } finally { setLoading(false) }
   }
 
-  const limitLabel = granularity==='daily'?'max 15 days':granularity==='weekly'?'max 15 weeks':'max 15 months'
+  const limitLabel = granularity==='daily'?'max 15 days':granularity==='weekly'?'max 15 weeks':granularity==='daywise'?'groups by weekday':'max 15 months'
 
   return (
     <div style={{ minHeight: '100vh', background: '#f5f5f5', fontFamily: 'Inter, system-ui, sans-serif' }}>
@@ -224,11 +224,11 @@ export default function Home() {
           <Sep/>
           <Lbl>View</Lbl>
           <div style={{ display:'flex', border:'1px solid #d1d5db', borderRadius:6, overflow:'hidden' }}>
-            {['daily','weekly','monthly'].map(g => (
+            {['daily','weekly','monthly','daywise'].map(g => (
               <button key={g} onClick={()=>{setGranularity(g);setSearched(false)}} style={{
                 padding:'4px 12px', fontSize:12, fontWeight:500, border:'none', cursor:'pointer',
                 background: granularity===g?'#2563eb':'#fff', color: granularity===g?'#fff':'#374151'
-              }}>{g.charAt(0).toUpperCase()+g.slice(1)}</button>
+              }}>{g==='daywise'?'Day-wise':g.charAt(0).toUpperCase()+g.slice(1)}</button>
             ))}
           </div>
           <Sep/>
@@ -279,11 +279,13 @@ const Box = ({children}) => <div style={{ background:'#fff', borderRadius:10, bo
 // ═══════════════════════════════════════════════════════════
 function BrandDetailsTab({ periodData, searched, loading }) {
   if (!searched || loading || !periodData.length) return <EmptyState searched={searched} loading={loading} />
+  const PERIOD_W = SUB_COL_W * 3
   return (
     <div style={{ background:'#fff', borderRadius:10, border:'1px solid #e5e7eb', overflow:'hidden' }}>
       <div style={{ display:'flex', overflow:'hidden' }}>
+        {/* Frozen metric column */}
         <div style={{ minWidth:METRIC_COL_W, maxWidth:METRIC_COL_W, flexShrink:0, borderRight:'2px solid #e5e7eb', zIndex:10, background:'#fff' }}>
-          <div style={{ height:52, display:'flex', alignItems:'center', padding:'0 14px', background:'#f9fafb', borderBottom:'1px solid #e5e7eb' }}>
+          <div style={{ height:68, display:'flex', alignItems:'center', padding:'0 14px', background:'#f9fafb', borderBottom:'1px solid #e5e7eb' }}>
             <span style={{ fontSize:12, fontWeight:600, color:'#374151' }}>Metric</span>
           </div>
           {BD_SECTIONS.map((sec,si) => (
@@ -299,27 +301,47 @@ function BrandDetailsTab({ periodData, searched, loading }) {
             </div>
           ))}
         </div>
+        {/* Scrollable data with platform sub-columns */}
         <div style={{ overflowX:'auto', flex:1 }}>
-          <div style={{ minWidth:DATA_COL_W*periodData.length }}>
-            <div style={{ display:'flex', background:'#f9fafb', borderBottom:'1px solid #e5e7eb', height:52 }}>
-              {periodData.map((p,i) => (
-                <div key={i} style={{ minWidth:DATA_COL_W, width:DATA_COL_W, borderRight:'1px solid #f3f4f6', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'4px 8px' }}>
-                  {p.label.split('\n').map((l,li) => (
-                    <span key={li} style={{ fontSize:li===0?12:10, fontWeight:li===0?600:400, color:li===0?'#111':'#6b7280', textAlign:'center', lineHeight:1.3 }}>{l}</span>
-                  ))}
+          <div style={{ minWidth:PERIOD_W*periodData.length }}>
+            {/* Period + platform headers */}
+            <div style={{ display:'flex', background:'#f9fafb', borderBottom:'1px solid #e5e7eb' }}>
+              {periodData.map((p,pi) => (
+                <div key={pi} style={{ minWidth:PERIOD_W, width:PERIOD_W, borderRight:'1px solid #d1d5db' }}>
+                  <div style={{ height:34, display:'flex', alignItems:'center', justifyContent:'center', borderBottom:'1px solid #e5e7eb' }}>
+                    {p.label.split('\n').map((l,li) => (
+                      <span key={li} style={{ fontSize:li===0?12:10, fontWeight:li===0?600:400, color:li===0?'#111':'#6b7280', marginRight:li===0?6:0 }}>{l}</span>
+                    ))}
+                  </div>
+                  <div style={{ display:'flex', height:34 }}>
+                    {PLATFORMS.map((pl,pli) => (
+                      <div key={pli} style={{ width:SUB_COL_W, minWidth:SUB_COL_W, display:'flex', alignItems:'center', justifyContent:'center',
+                        borderRight:pli<2?'1px solid #e5e7eb':'none', fontSize:11, fontWeight:600, color:PLAT_COLORS[pl],
+                        background:pl==='combined'?'#f0f4ff':'#f9fafb' }}>{PLAT_LABELS[pl]}</div>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
+            {/* Section rows */}
             {BD_SECTIONS.map((sec,si) => (
               <div key={si}>
                 <div style={{ display:'flex', background:'#eef2ff', borderBottom:'1px solid #e5e7eb' }}>
-                  {periodData.map((_,i) => <div key={i} style={{ minWidth:DATA_COL_W, width:DATA_COL_W, height:30, borderRight:'1px solid #e5e7eb' }}/>)}
+                  {periodData.map((_,i) => (
+                    <div key={i} style={{ minWidth:PERIOD_W, width:PERIOD_W, height:30, borderRight:'1px solid #e5e7eb' }}/>
+                  ))}
                 </div>
                 {sec.rows.map((r,ri) => (
                   <div key={ri} style={{ display:'flex', borderBottom:'1px solid #f3f4f6' }}>
-                    {periodData.map((p,i) => (
-                      <div key={i} style={{ minWidth:DATA_COL_W, width:DATA_COL_W, height:40, display:'flex', alignItems:'center', justifyContent:'center', borderRight:'1px solid #f3f4f6', fontSize:13, fontWeight:600, color:'#111' }}>
-                        {fmt(p.data?.[r.key], r.type)}
+                    {periodData.map((p,pi) => (
+                      <div key={pi} style={{ minWidth:PERIOD_W, width:PERIOD_W, display:'flex', borderRight:'1px solid #d1d5db' }}>
+                        {PLATFORMS.map((pl,pli) => (
+                          <div key={pli} style={{ width:SUB_COL_W, minWidth:SUB_COL_W, height:40, display:'flex', alignItems:'center', justifyContent:'center',
+                            borderRight:pli<2?'1px solid #f3f4f6':'none', fontSize:13, fontWeight:600, color:'#111',
+                            background:pl==='combined'?'#f8faff':'#fff' }}>
+                            {fmt(p[pl]?.[r.key], r.type)}
+                          </div>
+                        ))}
                       </div>
                     ))}
                   </div>
